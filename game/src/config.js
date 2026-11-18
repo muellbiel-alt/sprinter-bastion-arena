@@ -1,61 +1,357 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Core tuning constants, palette, weapon evolutions, enemy archetypes, boss phases, and augment cards.
+// Designed for 1280x800 (16:10) logical resolution so screenshots fit the 768x480 cover cell edge-to-edge.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
+export const ARENA_CONFIG = {
+  width: 1280,
+  height: 800,
+  hudTopHeight: 74,
+  hudBottomHeight: 54,
+  margin: 44,
+  coreX: 640,
+  coreY: 416,
+  coreRadius: 48,
+  coreMaxHp: 500,
+  coreShieldRegen: 3.5,
+  totalWaves: 5,
+};
 
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
 export const STEP = 1 / 60;
+export const BEST_STORAGE_KEY = 'sprinter-bastion.best-v1';
 
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+export const SCREEN_TITLE = 'title';
+export const SCREEN_COMBAT = 'combat';
+export const SCREEN_UPGRADE = 'upgrade';
+export const SCREEN_PAUSED = 'paused';
+export const SCREEN_GAMEOVER = 'gameover';
+
+export const PLAYER_STATS = {
+  radius: 18,
+  maxHp: 120,
+  maxShield: 60,
+  baseSpeed: 330,
+  dashSpeed: 840,
+  dashDuration: 0.19,
+  dashCooldown: 0.85,
+  parryWindow: 0.22,
+  invulnerableAfterHit: 0.65,
+  overdriveMax: 100,
+  overdrivePerKill: 11,
+  overdrivePerParry: 28,
+  comboDecayTime: 4.5,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const WEAPON_EVOLUTIONS = {
+  pulseCarbine: {
+    id: 'pulseCarbine',
+    name: 'Vanguard Pulse Carbine',
+    shortLabel: 'PULSE CARBINE',
+    fireInterval: 0.14,
+    projectileSpeed: 780,
+    damage: 22,
+    spreadAngle: 0.04,
+    projectilesPerShot: 1,
+    pierce: 0,
+    chainTargets: 0,
+    color: '#22d3ee',
+  },
+  twinRail: {
+    id: 'twinRail',
+    name: 'Twin Helix Rail-Repeater',
+    shortLabel: 'TWIN RAIL-REPEATER',
+    fireInterval: 0.12,
+    projectileSpeed: 940,
+    damage: 26,
+    spreadAngle: 0.05,
+    projectilesPerShot: 2,
+    pierce: 1,
+    chainTargets: 0,
+    color: '#38bdf8',
+  },
+  prismScatter: {
+    id: 'prismScatter',
+    name: 'Prism Tri-Scatter Cannon',
+    shortLabel: 'PRISM SCATTER',
+    fireInterval: 0.21,
+    projectileSpeed: 740,
+    damage: 21,
+    spreadAngle: 0.16,
+    projectilesPerShot: 3,
+    pierce: 1,
+    chainTargets: 0,
+    color: '#f59e0b',
+  },
+  arcLance: {
+    id: 'arcLance',
+    name: 'Volt-Arc Chain Lance',
+    shortLabel: 'VOLT-ARC LANCE',
+    fireInterval: 0.16,
+    projectileSpeed: 880,
+    damage: 28,
+    spreadAngle: 0.06,
+    projectilesPerShot: 2,
+    pierce: 2,
+    chainTargets: 2,
+    color: '#a855f7',
+  },
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const ENEMY_ARCHETYPES = {
+  swarmer: {
+    kind: 'swarmer',
+    label: 'Vanguard Swarmer',
+    radius: 15,
+    hp: 46,
+    speed: 175,
+    damage: 14,
+    score: 120,
+    color: '#f43f5e',
+    accent: '#fda4af',
+    behavior: 'meleeLunge',
+    telegraphDuration: 0.45,
+    attackCooldown: 1.5,
+  },
+  sniper: {
+    kind: 'sniper',
+    label: 'Aegis Rail-Sniper',
+    radius: 17,
+    hp: 68,
+    speed: 96,
+    damage: 22,
+    score: 210,
+    color: '#fb923c',
+    accent: '#fed7aa',
+    behavior: 'laserLock',
+    telegraphDuration: 0.85,
+    attackCooldown: 2.3,
+    preferredRange: 310,
+  },
+  mortar: {
+    kind: 'mortar',
+    label: 'Pulse Mortar Drone',
+    radius: 20,
+    hp: 95,
+    speed: 78,
+    damage: 26,
+    score: 260,
+    color: '#c084fc',
+    accent: '#f3e8ff',
+    behavior: 'lobbedShell',
+    telegraphDuration: 0.95,
+    attackCooldown: 2.6,
+    preferredRange: 270,
+  },
+  bruiser: {
+    kind: 'bruiser',
+    label: 'Phalanx Heavy Bruiser',
+    radius: 25,
+    hp: 175,
+    speed: 108,
+    damage: 28,
+    score: 360,
+    color: '#e11d48',
+    accent: '#fecdd3',
+    behavior: 'shieldCharge',
+    telegraphDuration: 0.72,
+    attackCooldown: 2.4,
+  },
+  boss: {
+    kind: 'boss',
+    label: 'CHRONO WARDEN CORE',
+    radius: 44,
+    hp: 1450,
+    speed: 74,
+    damage: 32,
+    score: 2500,
+    color: '#facc15',
+    accent: '#fef08a',
+    behavior: 'bossMultiPhase',
+    telegraphDuration: 0.9,
+    attackCooldown: 1.85,
+  },
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+export const BOSS_PHASES = [
+  {
+    phase: 1,
+    hpThreshold: 1.0,
+    title: 'PHASE I: ORBITAL SALVO',
+    radialBolts: 8,
+    beamSweep: false,
+    summonInterval: 6.5,
+  },
+  {
+    phase: 2,
+    hpThreshold: 0.65,
+    title: 'PHASE II: CHRONO BEAM SWEEP',
+    radialBolts: 12,
+    beamSweep: true,
+    summonInterval: 5.0,
+  },
+  {
+    phase: 3,
+    hpThreshold: 0.32,
+    title: 'PHASE III: OVERCLOCKED SINGULARITY',
+    radialBolts: 16,
+    beamSweep: true,
+    summonInterval: 3.8,
+  },
+];
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const AUGMENT_CARDS = [
+  {
+    id: 'evolve_prism',
+    title: 'PRISM TRI-SCATTER CANNON',
+    category: 'WEAPON EVOLUTION',
+    badgeColor: '#f59e0b',
+    summary: 'Fires 3 high-velocity plasma bolts in a tactical arc with +1 Pierce.',
+    statLine: '+2 Projectiles • +1 Pierce • +25% Crit Chance',
+    weaponEvolution: 'prismScatter',
+    damageMult: 1.15,
+    critBonus: 0.2,
+  },
+  {
+    id: 'evolve_arc',
+    title: 'VOLT-ARC CHAIN LANCE',
+    category: 'WEAPON EVOLUTION',
+    badgeColor: '#a855f7',
+    summary: 'Twin hyper-bolts arc lightning to 2 nearby enemies on impact.',
+    statLine: '+2 Chain Arcs • +25% Projectile Velocity • +18% Damage',
+    weaponEvolution: 'arcLance',
+    damageMult: 1.18,
+    fireRateMult: 1.12,
+  },
+  {
+    id: 'evolve_rail',
+    title: 'TWIN HELIX RAIL-REPEATER',
+    category: 'WEAPON EVOLUTION',
+    badgeColor: '#38bdf8',
+    summary: 'Dual synchronized railgun barrels with rapid fire and armor penetration.',
+    statLine: '+22% Fire Rate • Twin Bolts • +20% Boss Damage',
+    weaponEvolution: 'twinRail',
+    damageMult: 1.16,
+    fireRateMult: 1.22,
+  },
+  {
+    id: 'bastion_parry_capacitor',
+    title: 'PHASE-PARRY CAPACITOR',
+    category: 'DEFENSE & OVERDRIVE',
+    badgeColor: '#22d3ee',
+    summary: 'Phase-Dashing through enemy telegraphs unleashes a reflective shockwave.',
+    statLine: '+40% Parry Shockwave • +35 Overdrive Charge • -20% Dash Cooldown',
+    dashCooldownMult: 0.8,
+    parryDamageBonus: 45,
+    overdriveGainMult: 1.35,
+  },
+  {
+    id: 'aegis_nanite_repair',
+    title: 'AEGIS NANITE MATRIX',
+    category: 'BASTION FORTIFICATION',
+    badgeColor: '#10b981',
+    summary: 'Restores Sprinter Hull & Bastion Core integrity and boosts max shields.',
+    statLine: 'Instant +45 Hull & +140 Core HP • +25 Max Shield • +15% Speed',
+    healPlayer: 45,
+    healCore: 140,
+    maxShieldBonus: 25,
+    speedMult: 1.15,
+  },
+  {
+    id: 'overdrive_singularity',
+    title: 'OVERDRIVE NOVA REACTOR',
+    category: 'ULTIMATE PROTOCOL',
+    badgeColor: '#f43f5e',
+    summary: 'Overdrive Nova (E / Q) deals massive plasma burn and freezes enemy timers.',
+    statLine: '+55% Nova Damage • +30% Score Combo Gain • +15% Fire Rate',
+    novaDamageMult: 1.55,
+    fireRateMult: 1.15,
+    comboGainMult: 1.3,
+  },
+];
+
+export const WAVE_SCHEDULE = [
+  {
+    wave: 1,
+    title: 'SECTOR 1: VANGUARD RECON',
+    subtitle: 'Eliminate Vanguard Swarmers & Aegis Rail-Snipers targeting the Bastion Core',
+    spawns: [
+      { kind: 'swarmer', count: 6 },
+      { kind: 'sniper', count: 3 },
+    ],
+    spawnInterval: 1.15,
+  },
+  {
+    wave: 2,
+    title: 'SECTOR 2: ARTILLERY SIEGE',
+    subtitle: 'Dash through Mortar hazard rings & Sniper lock-on beams to trigger Parry!',
+    spawns: [
+      { kind: 'swarmer', count: 7 },
+      { kind: 'sniper', count: 4 },
+      { kind: 'mortar', count: 3 },
+    ],
+    spawnInterval: 1.0,
+  },
+  {
+    wave: 3,
+    title: 'SECTOR 3: PHALANX BREACH',
+    subtitle: 'Heavy Phalanx Bruisers join the assault — unleash Overdrive Nova (E / Q)!',
+    spawns: [
+      { kind: 'swarmer', count: 8 },
+      { kind: 'sniper', count: 4 },
+      { kind: 'mortar', count: 4 },
+      { kind: 'bruiser', count: 3 },
+    ],
+    spawnInterval: 0.9,
+  },
+  {
+    wave: 4,
+    title: 'SECTOR 4: ECLIPSE OVERLOAD',
+    subtitle: 'Elite crossfire convergence around the Aegis Core — keep your Combo high!',
+    spawns: [
+      { kind: 'swarmer', count: 10 },
+      { kind: 'sniper', count: 5 },
+      { kind: 'mortar', count: 5 },
+      { kind: 'bruiser', count: 4 },
+    ],
+    spawnInterval: 0.8,
+  },
+  {
+    wave: 5,
+    title: 'FINAL WAVE: CHRONO WARDEN DREADNOUGHT',
+    subtitle: 'BOSS FIGHT — Destroy the Chrono Warden before the Bastion Core collapses!',
+    spawns: [
+      { kind: 'boss', count: 1 },
+      { kind: 'swarmer', count: 6 },
+      { kind: 'sniper', count: 3 },
+      { kind: 'mortar', count: 2 },
+    ],
+    spawnInterval: 0.85,
+  },
+];
 
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  voidBg: '#060a12',
+  arenaBg: '#0b1324',
+  arenaGrid: '#172542',
+  arenaRing: '#1e3a6e',
+  coreHealthy: '#22d3ee',
+  coreWarning: '#f59e0b',
+  coreCritical: '#f43f5e',
+  playerBody: '#38bdf8',
+  playerCore: '#e0f2fe',
+  playerDash: '#67e8f9',
+  reticle: '#facc15',
+  hudBg: 'rgba(9, 15, 29, 0.90)',
+  hudBorder: '#253b66',
+  panelBg: 'rgba(10, 17, 34, 0.93)',
+  panelBorder: '#38bdf8',
+  textPrimary: '#f8fafc',
+  textSecondary: '#cbd5e1',
+  textMuted: '#94a3b8',
+  accentCyan: '#22d3ee',
+  accentAmber: '#f59e0b',
+  accentGold: '#facc15',
+  accentCrimson: '#f43f5e',
+  accentEmerald: '#10b981',
+  accentViolet: '#a855f7',
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const FONT_FAMILY = '"Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif';

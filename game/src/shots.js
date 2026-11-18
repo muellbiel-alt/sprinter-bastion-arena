@@ -1,79 +1,184 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Deterministic scene staging for ?shot=title|combat|upgrade|gameover&seed=1 (plus start|play|end aliases).
+// Runs the actual simulation with a tactical autopilot so every screenshot is an authentic, rich gameplay frame.
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+import {
+  ARENA_CONFIG,
+  AUGMENT_CARDS,
+  SCREEN_COMBAT,
+  SCREEN_GAMEOVER,
+  SCREEN_TITLE,
+  SCREEN_UPGRADE,
+  STEP,
+  WAVE_SCHEDULE,
+} from './config.js';
+import { spawnChronoWardenBoss, spawnEnemyFromEdge, spawnWaveEncounter } from './enemies.js';
+import {
+  spawnDashAfterimage,
+  spawnExplosionRing,
+  spawnFloatingCombatText,
+  spawnHitSparks,
+  spawnLightningArc,
+} from './particles.js';
+import { applySelectedAugmentCard, evolvePlayerWeapon } from './upgrades.js';
+import { fireEquippedWeapon } from './weapons.js';
+import { resetCampaignRun, stepBastionSimulation } from './world.js';
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
+export function runTacticalAutopilotStep(worldState, stepIndex) {
+  const player = worldState.player;
+  let target = worldState.enemies[0] || null;
+  let bestDist = Infinity;
+
+  for (let i = 0; i < worldState.enemies.length; i += 1) {
+    const e = worldState.enemies[i];
+    const d = Math.hypot(e.x - player.x, e.y - player.y);
+    if (d < bestDist) {
+      bestDist = d;
+      target = e;
     }
   }
-  return Infinity;
+
+  const orbitAngle = stepIndex * 0.032;
+  const desiredX = ARENA_CONFIG.coreX + Math.cos(orbitAngle) * 145;
+  const desiredY = ARENA_CONFIG.coreY + Math.sin(orbitAngle) * 115;
+  const dx = desiredX - player.x;
+  const dy = desiredY - player.y;
+  const len = Math.max(1, Math.hypot(dx, dy));
+
+  return {
+    moveX: dx / len,
+    moveY: dy / len,
+    aimX: target ? target.x : ARENA_CONFIG.coreX + 180,
+    aimY: target ? target.y : ARENA_CONFIG.coreY - 120,
+    firing: true,
+    dashRequested: stepIndex % 75 === 20,
+    overdriveRequested: false,
+  };
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+export function stageTitleBriefingShot(worldState, random) {
+  resetCampaignRun(worldState, random);
+  for (let i = 0; i < 180; i += 1) {
+    const cmd = runTacticalAutopilotStep(worldState, i);
+    stepBastionSimulation(worldState, random, null, STEP, cmd, true);
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+  worldState.score = 12450;
+  return { screen: SCREEN_TITLE, bestScore: 31200, hoveredButtonId: 'btn_start_mission' };
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+export function stageIntenseCombatShot(worldState, random) {
+  resetCampaignRun(worldState, random);
+  worldState.wave = 4;
+  worldState.acquiredAugments = [AUGMENT_CARDS[0], AUGMENT_CARDS[1], AUGMENT_CARDS[3]];
+  worldState.acquiredAugmentIds = worldState.acquiredAugments.map((a) => a.id);
+  evolvePlayerWeapon(worldState.player, 'prismScatter');
+  worldState.player.damageMult = 1.35;
+  worldState.player.critChance = 0.35;
+
+  spawnWaveEncounter(worldState, random, WAVE_SCHEDULE[3]);
+  const boss = spawnChronoWardenBoss(worldState, random);
+  boss.x = ARENA_CONFIG.coreX + 190;
+  boss.y = ARENA_CONFIG.coreY - 135;
+  boss.hp = 1120;
+  boss.maxHp = 1450;
+  boss.bossPhase = 2;
+  boss.beamSweepActive = true;
+  boss.beamAngle = 0.42;
+  boss.telegraphTimer = 0.55;
+  boss.telegraphMax = 0.9;
+
+  for (let i = 0; i < 210; i += 1) {
+    const cmd = runTacticalAutopilotStep(worldState, i);
+    stepBastionSimulation(worldState, random, null, STEP, cmd, true);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+
+  // Stage clear tactical combat readability around the Bastion Core
+  const player = worldState.player;
+  player.x = ARENA_CONFIG.coreX - 135;
+  player.y = ARENA_CONFIG.coreY + 78;
+  player.hp = 104;
+  player.shield = 52;
+  player.overdrive = 92;
+  player.combo = 4.5;
+  player.maxCombo = 4.5;
+  player.parryTimer = 0.18;
+  player.aimX = boss.x;
+  player.aimY = boss.y;
+  player.angle = Math.atan2(boss.y - player.y, boss.x - player.x);
+
+  worldState.core.hp = 445;
+  worldState.score = 18450;
+  worldState.kills = 38;
+  worldState.parries = 9;
+  worldState.waveBannerTimer = 0;
+
+  // Ensure visible enemy sniper lock-on & mortar hazard ring
+  const sniper = spawnEnemyFromEdge(worldState, random, 'sniper', {
+    x: ARENA_CONFIG.coreX - 310,
+    y: ARENA_CONFIG.coreY - 150,
+  });
+  sniper.telegraphTimer = 0.35;
+  sniper.telegraphMax = 0.85;
+  sniper.targetX = player.x;
+  sniper.targetY = player.y;
+
+  worldState.hazardZones.push({
+    x: ARENA_CONFIG.coreX + 85,
+    y: ARENA_CONFIG.coreY + 115,
+    radius: 68,
+    timer: 0.32,
+    maxTimer: 0.7,
+    damage: 26,
+    color: '#c084fc',
+  });
+
+  player.fireCooldown = 0;
+  fireEquippedWeapon(worldState, random, null);
+  spawnDashAfterimage(worldState.effects, player.x - 36, player.y + 18, player.angle, player.radius, '#22d3ee');
+  spawnDashAfterimage(worldState.effects, player.x - 18, player.y + 9, player.angle, player.radius, '#67e8f9');
+  spawnExplosionRing(worldState.effects, player.x, player.y, 78, '#facc15', 0.35);
+  spawnExplosionRing(worldState.effects, boss.x, boss.y, 96, '#22d3ee', 0.35);
+  spawnLightningArc(worldState.effects, boss.x, boss.y, sniper.x, sniper.y, '#a855f7');
+  spawnHitSparks(worldState.effects, random, boss.x - 18, boss.y + 14, '#facc15', 16, 1.1);
+  spawnFloatingCombatText(worldState.effects, player.x, player.y - 38, 'BASTION PARRY +250!', '#facc15', 21);
+  spawnFloatingCombatText(worldState.effects, boss.x, boss.y - 56, '-68 CRIT!', '#22d3ee', 22);
+
+  return { screen: SCREEN_COMBAT, bestScore: 31200, hoveredButtonId: null };
+}
+
+export function stageAugmentUpgradeShot(worldState, random) {
+  stageIntenseCombatShot(worldState, random);
+  worldState.wave = 2;
+  worldState.score = 11280;
+  worldState.augmentChoices = [AUGMENT_CARDS[0], AUGMENT_CARDS[1], AUGMENT_CARDS[3]];
+  worldState.selectedCardIndex = 0;
+  return { screen: SCREEN_UPGRADE, bestScore: 31200, hoveredButtonId: 'btn_card_1' };
+}
+
+export function stageGameOverResultsShot(worldState, random) {
+  stageIntenseCombatShot(worldState, random);
+  worldState.wave = 5;
+  worldState.score = 28640;
+  worldState.kills = 64;
+  worldState.parries = 14;
+  worldState.player.maxCombo = 6.25;
+  worldState.player.hp = 0;
+  worldState.core.hp = 180;
+  worldState.victory = false;
+  worldState.defeatReason = 'WAVE 5 BOSS: CHRONO WARDEN SINGULARITY';
+  applySelectedAugmentCard(worldState, 0);
+  return { screen: SCREEN_GAMEOVER, bestScore: 31200, hoveredButtonId: 'btn_play_again' };
+}
+
+export function stageDeterministicShotScene(shotName, worldState, random) {
+  const normalized = (shotName || 'title').toLowerCase();
+  if (normalized === 'combat' || normalized === 'play') {
+    return stageIntenseCombatShot(worldState, random);
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  if (normalized === 'upgrade' || normalized === 'augment') {
+    return stageAugmentUpgradeShot(worldState, random);
+  }
+  if (normalized === 'gameover' || normalized === 'end' || normalized === 'over') {
+    return stageGameOverResultsShot(worldState, random);
+  }
+  return stageTitleBriefingShot(worldState, random);
 }

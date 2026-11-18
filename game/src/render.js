@@ -1,39 +1,469 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
+// Canvas 2D arena renderer: tactical hex grid, Aegis Core reactor, enemy attack telegraphs,
+// distinct enemy hulls, Sprinter rig, plasma projectiles, lightning arcs, and floating combat text.
 
-export const SCREEN_TITLE = 'title';
-export const SCREEN_PLAY = 'play';
-export const SCREEN_PAUSED = 'paused';
-export const SCREEN_OVER = 'over';
+import {
+  ARENA_CONFIG,
+  FONT_FAMILY,
+  PALETTE,
+  SCREEN_COMBAT,
+  SCREEN_GAMEOVER,
+  SCREEN_PAUSED,
+  SCREEN_TITLE,
+  SCREEN_UPGRADE,
+} from './config.js';
+import {
+  drawAimReticle,
+  drawAugmentSelectionModal,
+  drawPauseModal,
+  drawRunResultsAndRestartModal,
+  drawTacticalHud,
+  drawTitleBriefingOverlay,
+} from './hud.js';
 
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
+export function drawBastionArenaFloor(ctx, worldState) {
+  ctx.fillStyle = PALETTE.arenaBg;
+  ctx.fillRect(0, 0, ARENA_CONFIG.width, ARENA_CONFIG.height);
 
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
-  };
+  // Radial core glow
+  const grad = ctx.createRadialGradient(
+    ARENA_CONFIG.coreX,
+    ARENA_CONFIG.coreY,
+    24,
+    ARENA_CONFIG.coreX,
+    ARENA_CONFIG.coreY,
+    460,
+  );
+  grad.addColorStop(0, 'rgba(34, 211, 238, 0.16)');
+  grad.addColorStop(0.5, 'rgba(30, 58, 138, 0.08)');
+  grad.addColorStop(1, 'rgba(11, 19, 36, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, ARENA_CONFIG.width, ARENA_CONFIG.height);
+
+  // Tactical grid lines
+  ctx.strokeStyle = PALETTE.arenaGrid;
+  ctx.lineWidth = 1;
+  const step = 64;
+  for (let x = step; x < ARENA_CONFIG.width; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x, ARENA_CONFIG.hudTopHeight);
+    ctx.lineTo(x, ARENA_CONFIG.height - ARENA_CONFIG.hudBottomHeight);
+    ctx.stroke();
+  }
+  for (let y = ARENA_CONFIG.hudTopHeight + step; y < ARENA_CONFIG.height - ARENA_CONFIG.hudBottomHeight; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(ARENA_CONFIG.width, y);
+    ctx.stroke();
+  }
+
+  // Concentric defense perimeter rings around Aegis Core
+  const radii = [110, 210, 320];
+  ctx.strokeStyle = PALETTE.arenaRing;
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < radii.length; i += 1) {
+    ctx.beginPath();
+    ctx.arc(ARENA_CONFIG.coreX, ARENA_CONFIG.coreY, radii[i], 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Arena combat perimeter frame
+  ctx.strokeStyle = '#1e3a8a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(
+    16,
+    ARENA_CONFIG.hudTopHeight + 8,
+    ARENA_CONFIG.width - 32,
+    ARENA_CONFIG.height - ARENA_CONFIG.hudTopHeight - ARENA_CONFIG.hudBottomHeight - 16,
+  );
 }
 
-export function createRenderer(canvas) {
-  const context = canvas.getContext('2d');
+export function drawAegisCoreShield(ctx, worldState) {
+  const core = worldState.core;
+  const ratio = core.hp / core.maxHp;
+  const color =
+    ratio > 0.5 ? PALETTE.coreHealthy : ratio > 0.25 ? PALETTE.coreWarning : PALETTE.coreCritical;
+
+  ctx.save();
+  ctx.translate(core.x, core.y);
+
+  // Outer rotating shield segments
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  for (let i = 0; i < 6; i += 1) {
+    const start = core.pulseAngle + (i * Math.PI) / 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, core.radius + 8, start, start + 0.68);
+    ctx.stroke();
+  }
+
+  // Octagonal reactor body
+  ctx.beginPath();
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i * Math.PI) / 4 + Math.PI / 8;
+    const rx = Math.cos(a) * core.radius;
+    const ry = Math.sin(a) * core.radius;
+    if (i === 0) ctx.moveTo(rx, ry);
+    else ctx.lineTo(rx, ry);
+  }
+  ctx.closePath();
+  ctx.fillStyle = core.hitFlash > 0 ? '#f43f5e' : '#0f1e3a';
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Inner core crystal
+  ctx.beginPath();
+  ctx.arc(0, 0, 20, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  ctx.font = `800 12px ${FONT_FAMILY}`;
+  ctx.fillStyle = '#06101e';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('AEGIS', 0, -4);
+  ctx.fillText(`${Math.ceil( (core.hp / core.maxHp) * 100 )}%`, 0, 8);
+
+  ctx.restore();
+}
+
+export function drawEnemyTelegraphsAndUnits(ctx, worldState) {
+  // 1. Mortar ground hazard rings
+  for (let i = 0; i < worldState.hazardZones.length; i += 1) {
+    const hz = worldState.hazardZones[i];
+    const progress = 1 - Math.max(0, hz.timer) / hz.maxTimer;
+    ctx.save();
+    ctx.translate(hz.x, hz.y);
+    ctx.beginPath();
+    ctx.arc(0, 0, hz.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(192, 132, 252, 0.18)';
+    ctx.fill();
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, hz.radius * progress, 0, Math.PI * 2);
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 2. Enemy attack telegraphs (laser lock-ons, charge vectors, boss sweep beams)
+  for (let i = 0; i < worldState.enemies.length; i += 1) {
+    const enemy = worldState.enemies[i];
+
+    if (enemy.kind === 'boss' && enemy.beamSweepActive) {
+      for (let b = 0; b < 4; b += 1) {
+        const angle = enemy.beamAngle + (b * Math.PI) / 2;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.42)';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(enemy.x, enemy.y);
+        ctx.lineTo(enemy.x + Math.cos(angle) * 520, enemy.y + Math.sin(angle) * 520);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (enemy.telegraphTimer > 0) {
+      const ratio = 1 - enemy.telegraphTimer / Math.max(0.1, enemy.telegraphMax);
+      ctx.save();
+      if (enemy.kind === 'sniper') {
+        ctx.strokeStyle = ratio > 0.65 ? '#facc15' : '#fb923c';
+        ctx.lineWidth = ratio > 0.65 ? 3.5 : 2;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath();
+        ctx.moveTo(enemy.x, enemy.y);
+        ctx.lineTo(enemy.targetX, enemy.targetY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (enemy.kind === 'swarmer' || enemy.kind === 'bruiser') {
+        const angle = Math.atan2(enemy.targetY - enemy.y, enemy.targetX - enemy.x);
+        const dist = enemy.kind === 'bruiser' ? 110 : 80;
+        ctx.strokeStyle = '#f43f5e';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(enemy.x, enemy.y);
+        ctx.lineTo(enemy.x + Math.cos(angle) * dist, enemy.y + Math.sin(angle) * dist);
+        ctx.stroke();
+      } else if (enemy.kind === 'boss') {
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(enemy.x, enemy.y, enemy.radius + 14 + ratio * 22, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // 3. Enemy hulls and health bars
+  for (let i = 0; i < worldState.enemies.length; i += 1) {
+    const enemy = worldState.enemies[i];
+    ctx.save();
+    ctx.translate(enemy.x, enemy.y);
+    ctx.rotate(enemy.angle);
+
+    const fill = enemy.hitFlash > 0 ? '#ffffff' : enemy.color;
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = enemy.accent;
+    ctx.lineWidth = 2.5;
+
+    if (enemy.kind === 'boss') {
+      // Dreadnought multi-ring hull
+      ctx.beginPath();
+      for (let p = 0; p < 12; p += 1) {
+        const a = (p * Math.PI) / 6;
+        const r = p % 2 === 0 ? enemy.radius + 6 : enemy.radius - 8;
+        const px = Math.cos(a) * r;
+        const py = Math.sin(a) * r;
+        if (p === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.fillStyle = '#dc2626';
+      ctx.fill();
+      ctx.stroke();
+    } else if (enemy.kind === 'sniper') {
+      // Angular rail-sniper triangle
+      ctx.beginPath();
+      ctx.moveTo(enemy.radius + 6, 0);
+      ctx.lineTo(-enemy.radius, -enemy.radius * 0.85);
+      ctx.lineTo(-enemy.radius * 0.5, 0);
+      ctx.lineTo(-enemy.radius, enemy.radius * 0.85);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (enemy.kind === 'mortar') {
+      // Hexagonal artillery drone
+      ctx.beginPath();
+      for (let p = 0; p < 6; p += 1) {
+        const a = (p * Math.PI) / 3;
+        const px = Math.cos(a) * enemy.radius;
+        const py = Math.sin(a) * enemy.radius;
+        if (p === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (enemy.kind === 'bruiser') {
+      // Heavy armored juggernaut with front shield arc
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(0, 0, enemy.radius + 4, -0.9, 0.9);
+      ctx.stroke();
+    } else {
+      // Swarmer interceptor
+      ctx.beginPath();
+      ctx.moveTo(enemy.radius + 3, 0);
+      ctx.lineTo(-enemy.radius, -enemy.radius * 0.75);
+      ctx.lineTo(-enemy.radius, enemy.radius * 0.75);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Unit mini health bar
+    if (enemy.kind !== 'boss' && enemy.hp < enemy.maxHp) {
+      const bw = enemy.radius * 2;
+      const bx = enemy.x - enemy.radius;
+      const by = enemy.y - enemy.radius - 11;
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx, by, bw, 5);
+      ctx.fillStyle = enemy.color;
+      ctx.fillRect(bx, by, Math.max(2, bw * (enemy.hp / enemy.maxHp)), 5);
+    }
+  }
+}
+
+export function drawPlayerSprinterRig(ctx, worldState) {
+  const player = worldState.player;
+
+  // Dash afterimages
+  for (let i = 0; i < worldState.effects.afterimages.length; i += 1) {
+    const a = worldState.effects.afterimages[i];
+    const alpha = Math.max(0, a.life / a.maxLife) * 0.55;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.angle);
+    ctx.fillStyle = a.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, a.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Tactical laser aim line toward reticle
+  ctx.save();
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y);
+  ctx.lineTo(player.aimX, player.aimY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(player.x, player.y);
+
+  // Parry window golden reflective halo
+  if (player.parryTimer > 0) {
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, player.radius + 14, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (player.shield > 0) {
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, player.radius + 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.rotate(player.angle);
+
+  // Sprinter chassis & twin cannon barrels
+  ctx.fillStyle = player.weapon.color;
+  ctx.fillRect(6, -8, player.radius + 10, 5);
+  ctx.fillRect(6, 3, player.radius + 10, 5);
+
+  ctx.beginPath();
+  ctx.moveTo(player.radius + 6, 0);
+  ctx.lineTo(-player.radius, -player.radius);
+  ctx.lineTo(-player.radius * 0.55, 0);
+  ctx.lineTo(-player.radius, player.radius);
+  ctx.closePath();
+  ctx.fillStyle = PALETTE.playerBody;
+  ctx.fill();
+  ctx.strokeStyle = '#e0f2fe';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 7, 0, Math.PI * 2);
+  ctx.fillStyle = PALETTE.playerCore;
+  ctx.fill();
+
+  ctx.restore();
+}
+
+export function drawProjectilesAndParticles(ctx, worldState) {
+  // Shockwave rings
+  for (let i = 0; i < worldState.effects.rings.length; i += 1) {
+    const r = worldState.effects.rings[i];
+    const alpha = Math.max(0, r.life / r.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Chain lightning arcs
+  for (let i = 0; i < worldState.effects.lightningArcs.length; i += 1) {
+    const arc = worldState.effects.lightningArcs[i];
+    const alpha = Math.max(0, arc.life / arc.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = arc.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(arc.x1, arc.y1);
+    ctx.lineTo((arc.x1 + arc.x2) / 2 + 8, (arc.y1 + arc.y2) / 2 - 8);
+    ctx.lineTo(arc.x2, arc.y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Player plasma bolts
+  for (let i = 0; i < worldState.playerProjectiles.length; i += 1) {
+    const bolt = worldState.playerProjectiles[i];
+    const angle = Math.atan2(bolt.vy, bolt.vx);
+    ctx.save();
+    ctx.translate(bolt.x, bolt.y);
+    ctx.rotate(angle);
+    ctx.fillStyle = bolt.color;
+    ctx.beginPath();
+    ctx.roundRect(-bolt.radius * 2.2, -bolt.radius * 0.7, bolt.radius * 3.4, bolt.radius * 1.4, 4);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Enemy plasma orbs (with parryable ring)
+  for (let i = 0; i < worldState.enemyProjectiles.length; i += 1) {
+    const orb = worldState.enemyProjectiles[i];
+    ctx.save();
+    ctx.translate(orb.x, orb.y);
+    ctx.beginPath();
+    ctx.arc(0, 0, orb.radius + 3, 0, Math.PI * 2);
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, orb.radius, 0, Math.PI * 2);
+    ctx.fillStyle = orb.color;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Hit sparks
+  for (let i = 0; i < worldState.effects.sparks.length; i += 1) {
+    const s = worldState.effects.sparks[i];
+    const alpha = Math.max(0, s.life / s.maxLife);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = s.color;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Floating combat numbers & callouts
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < worldState.effects.floatingTexts.length; i += 1) {
+    const f = worldState.effects.floatingTexts[i];
+    const alpha = Math.min(1, (f.life / f.maxLife) * 1.4);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `900 ${f.size}px ${FONT_FAMILY}`;
+    ctx.strokeStyle = '#060a12';
+    ctx.lineWidth = 4;
+    ctx.strokeText(f.text, f.x, f.y);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.restore();
+  }
+}
+
+export function createBastionRenderer(canvas) {
+  const ctx = canvas.getContext('2d');
   const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
+  const interactiveButtons = [];
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
@@ -41,101 +471,50 @@ export function createRenderer(canvas) {
     const height = Math.round(window.innerHeight * ratio);
     canvas.width = width;
     canvas.height = height;
-    view.scale = Math.min(width / FIELD.width, height / FIELD.height);
-    view.x = (width - FIELD.width * view.scale) / 2;
-    view.y = (height - FIELD.height * view.scale) / 2;
+    view.scale = Math.min(width / ARENA_CONFIG.width, height / ARENA_CONFIG.height);
+    view.x = (width - ARENA_CONFIG.width * view.scale) / 2;
+    view.y = (height - ARENA_CONFIG.height * view.scale) / 2;
   }
 
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align;
-    context.fillText(value, x, y);
-  }
+  function renderFrame(worldState, screen, bestScore, audioMuted = false, hoveredButtonId = null) {
+    interactiveButtons.length = 0;
 
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = PALETTE.voidBg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
-      }
-    }
+    const shakeX = worldState.effects ? worldState.effects.shakeX : 0;
+    const shakeY = worldState.effects ? worldState.effects.shakeY : 0;
+    ctx.setTransform(view.scale, 0, 0, view.scale, view.x + shakeX * view.scale, view.y + shakeY * view.scale);
 
-    const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
-    }
-  }
+    drawBastionArenaFloor(ctx, worldState);
+    drawAegisCoreShield(ctx, worldState);
+    drawEnemyTelegraphsAndUnits(ctx, worldState);
+    drawPlayerSprinterRig(ctx, worldState);
+    drawProjectilesAndParticles(ctx, worldState);
+    drawAimReticle(ctx, worldState.player.aimX, worldState.player.aimY, worldState.player);
 
-  function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
-  }
+    // Reset shake offset for crisp HUD and modal rendering
+    ctx.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+    drawTacticalHud(ctx, worldState, bestScore, audioMuted, interactiveButtons, hoveredButtonId);
 
-  function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
-  }
-
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-    drawField(state);
     if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
+      drawTitleBriefingOverlay(ctx, worldState, bestScore, interactiveButtons, hoveredButtonId);
+    } else if (screen === SCREEN_UPGRADE) {
+      drawAugmentSelectionModal(ctx, worldState, interactiveButtons, hoveredButtonId);
+    } else if (screen === SCREEN_PAUSED) {
+      drawPauseModal(ctx, interactiveButtons, hoveredButtonId);
+    } else if (screen === SCREEN_GAMEOVER) {
+      drawRunResultsAndRestartModal(ctx, worldState, bestScore, interactiveButtons, hoveredButtonId);
     }
   }
 
   resize();
   window.addEventListener('resize', resize);
-  return { draw };
+
+  return {
+    draw: renderFrame,
+    getViewportTransform: () => view,
+    getInteractiveButtons: () => interactiveButtons,
+  };
 }

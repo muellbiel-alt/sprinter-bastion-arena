@@ -44,6 +44,7 @@ export function createInitialPlayerState() {
     dashDirY: -1,
     afterimageTick: 0,
     invulnerable: 0,
+    moving: false,
     weaponId: 'pulseCarbine',
     weapon: WEAPON_EVOLUTIONS.pulseCarbine,
     damageMult: 1.0,
@@ -190,6 +191,9 @@ export function stepBastionSimulation(worldState, random, audio, dt, controlInpu
   player.shield = Math.min(player.maxShield, player.shield + ARENA_CONFIG.coreShieldRegen * dt);
 
   // Movement / Phase-Dash physics
+  player.moving = Boolean(
+    player.dashTimer > 0 || (controlInput && (controlInput.moveX !== 0 || controlInput.moveY !== 0)),
+  );
   if (player.dashTimer > 0) {
     player.dashTimer = Math.max(0, player.dashTimer - dt);
     player.x += player.dashDirX * PLAYER_STATS.dashSpeed * dt;

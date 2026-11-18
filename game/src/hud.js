@@ -1,7 +1,8 @@
-// High-contrast Tactical HUD, Title Briefing Modal, Augment Card Selection Modal,
-// Pause Overlay, Game Over / Victory Run Summary Modal, and Precision Mouse Reticle.
+// Iconic Tactical HUD, live-backdrop Title Emblem Screen, Illustrated Augment Draft Cards,
+// Pause Modal, and Compact Medal Results Screen.
 
-import { ARENA_CONFIG, FONT_FAMILY, PALETTE, PLAYER_STATS } from './config.js';
+import { ARENA_CONFIG, FONT_FAMILY, PLAYER_STATS } from './config.js';
+import { TAU, formatNumber, labelText, roundedRectPath } from './draw-utils.js';
 import {
   CMD_CARD_1,
   CMD_CARD_2,
@@ -12,430 +13,492 @@ import {
   CMD_START_OR_CONFIRM,
 } from './input.js';
 
-export function drawRoundedRect(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + w - radius, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-  ctx.lineTo(x + w, y + h - radius);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-  ctx.lineTo(x + radius, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
+const INK = '#121829';
 
-function setFont(ctx, weight, sizePx) {
-  ctx.font = `${weight} ${sizePx}px ${FONT_FAMILY}`;
-}
-
-function drawProgressBar(ctx, x, y, w, h, ratio, fillColor, backColor = '#111c35', borderColor = '#2b4470') {
+function drawPillBar(ctx, x, y, w, h, ratio, fillA, fillB, bg = '#151c30') {
   const clamped = Math.max(0, Math.min(1, ratio));
-  drawRoundedRect(ctx, x, y, w, h, 5);
-  ctx.fillStyle = backColor;
+  roundedRectPath(ctx, x, y, w, h, h / 2);
+  ctx.fillStyle = bg;
   ctx.fill();
-  if (clamped > 0) {
-    drawRoundedRect(ctx, x + 2, y + 2, Math.max(6, (w - 4) * clamped), h - 4, 4);
-    ctx.fillStyle = fillColor;
+
+  if (clamped > 0.01) {
+    const fillW = Math.max(h, (w - 4) * clamped);
+    const grad = ctx.createLinearGradient(x, y, x, y + h);
+    grad.addColorStop(0, fillA);
+    grad.addColorStop(1, fillB);
+    roundedRectPath(ctx, x + 2, y + 2, fillW, h - 4, (h - 4) / 2);
+    ctx.fillStyle = grad;
     ctx.fill();
   }
-  drawRoundedRect(ctx, x, y, w, h, 5);
-  ctx.strokeStyle = borderColor;
-  ctx.lineWidth = 1.5;
+
+  roundedRectPath(ctx, x, y, w, h, h / 2);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2.2;
   ctx.stroke();
 }
 
-export function drawTacticalHud(ctx, worldState, bestScore, audioMuted, interactiveButtons, hoveredButtonId) {
+function drawHeartIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.moveTo(0, size * 0.42);
+  ctx.bezierCurveTo(-size * 0.65, -size * 0.05, -size * 0.52, -size * 0.62, 0, -size * 0.22);
+  ctx.bezierCurveTo(size * 0.52, -size * 0.62, size * 0.65, -size * 0.05, 0, size * 0.42);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawShieldIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.48);
+  ctx.lineTo(size * 0.44, -size * 0.28);
+  ctx.lineTo(size * 0.36, size * 0.2);
+  ctx.lineTo(0, size * 0.52);
+  ctx.lineTo(-size * 0.36, size * 0.2);
+  ctx.lineTo(-size * 0.44, -size * 0.28);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBoltIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.moveTo(size * 0.12, -size * 0.52);
+  ctx.lineTo(-size * 0.36, size * 0.04);
+  ctx.lineTo(-size * 0.02, size * 0.04);
+  ctx.lineTo(-size * 0.16, size * 0.52);
+  ctx.lineTo(size * 0.38, -size * 0.06);
+  ctx.lineTo(size * 0.04, -size * 0.06);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCoreCrystalIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.52);
+  ctx.lineTo(size * 0.38, 0);
+  ctx.lineTo(0, size * 0.52);
+  ctx.lineTo(-size * 0.38, 0);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTrophyIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.38, -size * 0.42);
+  ctx.lineTo(size * 0.38, -size * 0.42);
+  ctx.lineTo(size * 0.24, size * 0.08);
+  ctx.lineTo(-size * 0.24, size * 0.08);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillRect(-size * 0.1, size * 0.08, size * 0.2, size * 0.24);
+  ctx.strokeRect(-size * 0.1, size * 0.08, size * 0.2, size * 0.24);
+  ctx.fillRect(-size * 0.28, size * 0.32, size * 0.56, size * 0.14);
+  ctx.strokeRect(-size * 0.28, size * 0.32, size * 0.56, size * 0.14);
+  ctx.restore();
+}
+
+function drawCrossedSwordsIcon(ctx, cx, cy, size, color) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = INK;
+  ctx.lineCap = 'round';
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.scale(s, 1);
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.38, size * 0.38);
+    ctx.lineTo(size * 0.38, -size * 0.38);
+    ctx.stroke();
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+export function drawTacticalHud(ctx, worldState, bestScore, audioMuted, interactiveButtons, hoveredButtonId, screen) {
   const player = worldState.player;
   const core = worldState.core;
 
-  // Top HUD Bar backdrop
-  ctx.fillStyle = PALETTE.hudBg;
+  // Compact top bar backdrop
+  ctx.fillStyle = 'rgba(13, 19, 36, 0.88)';
   ctx.fillRect(0, 0, ARENA_CONFIG.width, ARENA_CONFIG.hudTopHeight);
-  ctx.strokeStyle = PALETTE.hudBorder;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, ARENA_CONFIG.hudTopHeight);
-  ctx.lineTo(ARENA_CONFIG.width, ARENA_CONFIG.hudTopHeight);
-  ctx.stroke();
+  ctx.fillStyle = '#2d3f69';
+  ctx.fillRect(0, ARENA_CONFIG.hudTopHeight - 2, ARENA_CONFIG.width, 2);
 
-  ctx.textBaseline = 'middle';
+  // On title screen keep top bar ultra clean (just Audio button + Best Score pill)
+  if (screen === 'title') {
+    const muteBtn = { id: 'btn_mute', x: ARENA_CONFIG.width - 68, y: 15, w: 46, h: 42, command: CMD_MUTE_TOGGLE };
+    interactiveButtons.push(muteBtn);
+    roundedRectPath(ctx, muteBtn.x, muteBtn.y, muteBtn.w, muteBtn.h, 10);
+    ctx.fillStyle = hoveredButtonId === muteBtn.id ? '#2563eb' : '#1b2644';
+    ctx.fill();
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    labelText(ctx, audioMuted ? '🔇' : '🔊', muteBtn.x + 23, muteBtn.y + 22, 20, '#f8fafc', { stroke: null });
 
-  // 1. Sprinter Hull & Shield block (x: 16..276)
-  ctx.textAlign = 'left';
-  setFont(ctx, '700', 14);
-  ctx.fillStyle = PALETTE.accentCyan;
-  ctx.fillText(`SPRINTER HULL ${Math.ceil(player.hp)}/${player.maxHp}`, 18, 18);
-  setFont(ctx, '700', 13);
-  ctx.fillStyle = '#93c5fd';
-  ctx.textAlign = 'right';
-  ctx.fillText(`SHIELD ${Math.floor(player.shield)}`, 268, 18);
-  drawProgressBar(ctx, 18, 29, 250, 16, player.hp / player.maxHp, '#10b981');
-  drawProgressBar(ctx, 18, 50, 250, 12, player.shield / player.maxShield, '#38bdf8');
-
-  // 2. Aegis Bastion Core block (x: 288..548)
-  ctx.textAlign = 'left';
-  setFont(ctx, '700', 14);
-  const coreColor =
-    core.hp / core.maxHp > 0.5
-      ? PALETTE.coreHealthy
-      : core.hp / core.maxHp > 0.25
-        ? PALETTE.coreWarning
-        : PALETTE.coreCritical;
-  ctx.fillStyle = coreColor;
-  ctx.fillText(`BASTION CORE ${Math.ceil(core.hp)}/${core.maxHp}`, 288, 18);
-  drawProgressBar(ctx, 288, 29, 248, 18, core.hp / core.maxHp, coreColor);
-  setFont(ctx, '600', 12);
-  ctx.fillStyle = PALETTE.textSecondary;
-  ctx.fillText('DEFEND CENTRAL AEGIS REACTOR', 288, 57);
-
-  // 3. Center Wave & Hostiles Badge (x: 554..744)
-  drawRoundedRect(ctx, 552, 8, 196, 58, 8);
-  ctx.fillStyle = '#132242';
-  ctx.fill();
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.textAlign = 'center';
-  setFont(ctx, '800', 18);
-  ctx.fillStyle = '#facc15';
-  ctx.fillText(`WAVE ${worldState.wave} / ${worldState.totalWaves}`, 650, 25);
-  const remainingFoes = worldState.enemies.length + (worldState.spawnQueue ? worldState.spawnQueue.length : 0);
-  setFont(ctx, '700', 13);
-  ctx.fillStyle = PALETTE.textPrimary;
-  ctx.fillText(`HOSTILES ACTIVE: ${remainingFoes}`, 650, 48);
-
-  // 4. Overdrive Gauge (x: 762..972)
-  const odReady = player.overdrive >= PLAYER_STATS.overdriveMax;
-  ctx.textAlign = 'left';
-  setFont(ctx, '700', 14);
-  ctx.fillStyle = odReady ? '#facc15' : '#e879f9';
-  ctx.fillText(
-    odReady ? 'OVERDRIVE READY! [E / Q]' : `OVERDRIVE ${Math.floor(player.overdrive)}% [E / Q]`,
-    764,
-    18,
-  );
-  drawProgressBar(
-    ctx,
-    764,
-    29,
-    204,
-    18,
-    player.overdrive / PLAYER_STATS.overdriveMax,
-    odReady ? '#facc15' : '#c084fc',
-  );
-  setFont(ctx, '600', 12);
-  ctx.fillStyle = PALETTE.textSecondary;
-  const dashReady = player.dashCooldown <= 0;
-  ctx.fillText(
-    dashReady ? 'DASH-PARRY [SPACE]: READY' : `DASH COOLDOWN: ${player.dashCooldown.toFixed(1)}s`,
-    764,
-    57,
-  );
-
-  // 5. Score, Combo & Quick Action Buttons (x: 984..1268)
-  ctx.textAlign = 'right';
-  setFont(ctx, '800', 22);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText(`SCORE ${worldState.score.toLocaleString('en-US')}`, 1168, 22);
-
-  setFont(ctx, '800', 15);
-  ctx.fillStyle = '#facc15';
-  ctx.fillText(`COMBO x${player.combo.toFixed(1)}`, 1072, 52);
-
-  setFont(ctx, '600', 13);
-  ctx.fillStyle = PALETTE.textMuted;
-  ctx.fillText(`BEST ${Math.max(bestScore, worldState.score).toLocaleString('en-US')}`, 1168, 52);
-
-  // Pause & Mute interactive buttons
-  const pauseBtn = { id: 'btn_pause', x: 1180, y: 10, w: 86, h: 25, command: CMD_PAUSE_TOGGLE };
-  const muteBtn = { id: 'btn_mute', x: 1180, y: 40, w: 86, h: 25, command: CMD_MUTE_TOGGLE };
-  interactiveButtons.push(pauseBtn, muteBtn);
-
-  drawRoundedRect(ctx, pauseBtn.x, pauseBtn.y, pauseBtn.w, pauseBtn.h, 5);
-  ctx.fillStyle = hoveredButtonId === pauseBtn.id ? '#2563eb' : '#1e293b';
-  ctx.fill();
-  ctx.strokeStyle = '#475569';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.textAlign = 'center';
-  setFont(ctx, '700', 12);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText('[P] PAUSE', pauseBtn.x + pauseBtn.w / 2, pauseBtn.y + 13);
-
-  drawRoundedRect(ctx, muteBtn.x, muteBtn.y, muteBtn.w, muteBtn.h, 5);
-  ctx.fillStyle = hoveredButtonId === muteBtn.id ? '#2563eb' : '#1e293b';
-  ctx.fill();
-  ctx.strokeStyle = '#475569';
-  ctx.stroke();
-  ctx.fillStyle = audioMuted ? '#f43f5e' : '#22d3ee';
-  ctx.fillText(audioMuted ? '[M] MUTED' : '[M] AUDIO', muteBtn.x + muteBtn.w / 2, muteBtn.y + 13);
-
-  // Bottom Tactical Status Bar
-  const botY = ARENA_CONFIG.height - ARENA_CONFIG.hudBottomHeight;
-  ctx.fillStyle = PALETTE.hudBg;
-  ctx.fillRect(0, botY, ARENA_CONFIG.width, ARENA_CONFIG.hudBottomHeight);
-  ctx.strokeStyle = PALETTE.hudBorder;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, botY);
-  ctx.lineTo(ARENA_CONFIG.width, botY);
-  ctx.stroke();
-
-  ctx.textAlign = 'left';
-  setFont(ctx, '700', 14);
-  ctx.fillStyle = player.weapon.color;
-  ctx.fillText(`ARMAMENT: ${player.weapon.shortLabel}`, 18, botY + 18);
-
-  setFont(ctx, '600', 13);
-  ctx.fillStyle = PALETTE.textSecondary;
-  const augNames =
-    worldState.acquiredAugments.length > 0
-      ? worldState.acquiredAugments.map((a) => a.title.split(' ')[0]).join(' + ')
-      : 'STANDARD LOADOUT';
-  ctx.fillText(`AUGMENTS (${worldState.acquiredAugments.length}): ${augNames}  •  PARRIES: ${worldState.parries}`, 18, botY + 38);
-
-  ctx.textAlign = 'right';
-  setFont(ctx, '600', 13);
-  ctx.fillStyle = '#e2e8f0';
-  ctx.fillText(
-    'CONTROLS: [WASD/Arrows] Move • [Mouse + L-Click] Aim & Shoot • [Space/R-Click] Dash-Parry • [E/Q] Nova • [R] Restart',
-    ARENA_CONFIG.width - 18,
-    botY + 28,
-  );
-
-  // Boss health bar overlay at top of arena if Chrono Warden is active
-  const boss = worldState.enemies.find((e) => e.kind === 'boss');
-  if (boss) {
-    const bw = 540;
-    const bx = (ARENA_CONFIG.width - bw) / 2;
-    const by = ARENA_CONFIG.hudTopHeight + 12;
-    drawRoundedRect(ctx, bx - 12, by - 6, bw + 24, 42, 8);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    roundedRectPath(ctx, 20, 16, 224, 40, 20);
+    ctx.fillStyle = '#182440';
     ctx.fill();
     ctx.strokeStyle = '#facc15';
     ctx.lineWidth = 2;
     ctx.stroke();
+    drawTrophyIcon(ctx, 44, 36, 22, '#facc15');
+    labelText(ctx, `BEST ${formatNumber(bestScore)}`, 140, 37, 17, '#fef08a', { weight: '800' });
+    return;
+  }
 
-    ctx.textAlign = 'center';
-    setFont(ctx, '800', 14);
-    ctx.fillStyle = '#facc15';
-    ctx.fillText(
-      `BOSS: ${boss.label} (PHASE ${boss.bossPhase}/3) — ${Math.ceil(boss.hp)} / ${boss.maxHp} HP`,
-      ARENA_CONFIG.width / 2,
-      by + 6,
-    );
-    drawProgressBar(ctx, bx, by + 17, bw, 14, boss.hp / boss.maxHp, '#f43f5e', '#1f1224', '#facc15');
-  } else if (worldState.waveBannerTimer > 0 && worldState.waveTitle) {
-    const bw = 520;
+  // 1. Left Cluster: Hull HP + Shield + Bastion Core (compact iconic bars)
+  drawHeartIcon(ctx, 30, 24, 24, '#fb7185');
+  drawPillBar(ctx, 50, 13, 176, 22, player.hp / player.maxHp, '#34d399', '#059669');
+  labelText(ctx, `${Math.ceil(player.hp)}/${player.maxHp}`, 138, 24, 13, '#ffffff', { weight: '900' });
+
+  drawShieldIcon(ctx, 30, 52, 20, '#38bdf8');
+  drawPillBar(ctx, 50, 43, 176, 16, player.shield / player.maxShield, '#67e8f9', '#0284c7');
+  labelText(ctx, `${Math.floor(player.shield)}`, 138, 51, 11, '#e0f2fe', { weight: '800' });
+
+  // Bastion Core Integrity Pill
+  const coreRatio = core.hp / core.maxHp;
+  const coreA = coreRatio > 0.5 ? '#22d3ee' : coreRatio > 0.25 ? '#fbbf24' : '#fb7185';
+  const coreB = coreRatio > 0.5 ? '#0891b2' : coreRatio > 0.25 ? '#d97706' : '#e11d48';
+  drawCoreCrystalIcon(ctx, 256, 36, 28, coreA);
+  drawPillBar(ctx, 278, 23, 176, 24, coreRatio, coreA, coreB);
+  labelText(ctx, `CORE ${Math.ceil(coreRatio * 100)}%`, 366, 35, 13, '#ffffff', { weight: '900' });
+
+  // 2. Center Wave & Hostiles Emblem
+  roundedRectPath(ctx, 518, 10, 244, 54, 12);
+  ctx.fillStyle = '#182544';
+  ctx.fill();
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 2.4;
+  ctx.stroke();
+
+  labelText(ctx, `WAVE ${worldState.wave} / ${worldState.totalWaves}`, 606, 37, 21, '#facc15', { weight: '900' });
+  const foes = worldState.enemies.length + (worldState.spawnQueue ? worldState.spawnQueue.length : 0);
+  roundedRectPath(ctx, 686, 20, 64, 34, 8);
+  ctx.fillStyle = '#2a1626';
+  ctx.fill();
+  ctx.strokeStyle = '#fb7185';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  drawCrossedSwordsIcon(ctx, 703, 37, 16, '#fb7185');
+  labelText(ctx, `${foes}`, 729, 38, 16, '#ffe4e6', { weight: '900' });
+
+  // 3. Right Cluster: Overdrive Gauge + Score + Combo + Icon Buttons
+  const odReady = player.overdrive >= PLAYER_STATS.overdriveMax;
+  drawBoltIcon(ctx, 804, 36, 28, odReady ? '#facc15' : '#e879f9');
+  drawPillBar(
+    ctx,
+    822,
+    23,
+    144,
+    24,
+    player.overdrive / PLAYER_STATS.overdriveMax,
+    odReady ? '#fde047' : '#d946ef',
+    odReady ? '#eab308' : '#9333ea',
+  );
+  labelText(ctx, odReady ? 'NOVA [Q]' : `${Math.floor(player.overdrive)}%`, 894, 35, 13, '#ffffff', { weight: '900' });
+
+  // Score & Combo Badge
+  labelText(ctx, formatNumber(worldState.score), 1084, 27, 27, '#ffffff', { weight: '900', align: 'right' });
+  roundedRectPath(ctx, 1094, 13, 62, 48, 10);
+  ctx.fillStyle = player.combo >= 3 ? '#b45309' : '#1e293b';
+  ctx.fill();
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  labelText(ctx, `x${Math.round(player.combo)}`, 1125, 37, 21, '#fde047', { weight: '900' });
+
+  labelText(ctx, `BEST ${formatNumber(Math.max(bestScore, worldState.score))}`, 1084, 55, 12, '#94a3b8', {
+    weight: '700',
+    align: 'right',
+    stroke: null,
+  });
+
+  // Pause & Mute Icon Buttons
+  const pauseBtn = { id: 'btn_pause', x: 1170, y: 15, w: 42, h: 42, command: CMD_PAUSE_TOGGLE };
+  const muteBtn = { id: 'btn_mute', x: 1220, y: 15, w: 42, h: 42, command: CMD_MUTE_TOGGLE };
+  interactiveButtons.push(pauseBtn, muteBtn);
+
+  for (const [btn, symbol, activeColor] of [
+    [pauseBtn, '⏸', '#f8fafc'],
+    [muteBtn, audioMuted ? '🔇' : '🔊', audioMuted ? '#fb7185' : '#22d3ee'],
+  ]) {
+    roundedRectPath(ctx, btn.x, btn.y, btn.w, btn.h, 10);
+    ctx.fillStyle = hoveredButtonId === btn.id ? '#2563eb' : '#1a2540';
+    ctx.fill();
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    labelText(ctx, symbol, btn.x + btn.w / 2, btn.y + 22, 18, activeColor, { stroke: null });
+  }
+
+  // Boss HP Bar floating cleanly at top of arena
+  const boss = worldState.enemies.find((e) => e.kind === 'boss');
+  if (boss && screen === 'combat') {
+    const bw = 460;
+    const bx = (ARENA_CONFIG.width - bw) / 2;
+    const by = ARENA_CONFIG.hudTopHeight + 12;
+    roundedRectPath(ctx, bx - 14, by - 6, bw + 28, 38, 12);
+    ctx.fillStyle = 'rgba(22, 14, 34, 0.85)';
+    ctx.fill();
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    labelText(ctx, `CHRONO WARDEN • PHASE ${boss.bossPhase}`, ARENA_CONFIG.width / 2, by + 6, 13, '#fde047', {
+      weight: '900',
+    });
+    drawPillBar(ctx, bx, by + 16, bw, 12, boss.hp / boss.maxHp, '#fb7185', '#be123c', '#2a1222');
+  } else if (worldState.waveBannerTimer > 0 && worldState.waveTitle && screen === 'combat') {
+    const bw = 380;
     const bx = (ARENA_CONFIG.width - bw) / 2;
     const by = ARENA_CONFIG.hudTopHeight + 14;
-    drawRoundedRect(ctx, bx, by, bw, 46, 8);
-    ctx.fillStyle = 'rgba(13, 25, 48, 0.90)';
+    roundedRectPath(ctx, bx, by, bw, 36, 18);
+    ctx.fillStyle = 'rgba(13, 21, 40, 0.84)';
     ctx.fill();
-    ctx.strokeStyle = '#22d3ee';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.textAlign = 'center';
-    setFont(ctx, '800', 16);
-    ctx.fillStyle = '#22d3ee';
-    ctx.fillText(worldState.waveTitle, ARENA_CONFIG.width / 2, by + 16);
-    setFont(ctx, '600', 12);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(worldState.waveSubtitle, ARENA_CONFIG.width / 2, by + 34);
+    labelText(ctx, worldState.waveTitle, ARENA_CONFIG.width / 2, by + 18, 15, '#fef08a', { weight: '900' });
   }
+
+  // Slim Bottom Footer Strip (Armament badge + minimal control strip)
+  const botY = ARENA_CONFIG.height - ARENA_CONFIG.hudBottomHeight;
+  ctx.fillStyle = 'rgba(13, 19, 36, 0.86)';
+  ctx.fillRect(0, botY, ARENA_CONFIG.width, ARENA_CONFIG.hudBottomHeight);
+
+  roundedRectPath(ctx, 18, botY + 11, 240, 32, 16);
+  ctx.fillStyle = '#182544';
+  ctx.fill();
+  ctx.strokeStyle = player.weapon.color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  labelText(ctx, player.weapon.shortLabel, 138, botY + 27, 13, player.weapon.color, { weight: '900' });
+
+  labelText(
+    ctx,
+    'WASD Move  •  Mouse Aim/Fire  •  Space Dash/Parry  •  Q Overdrive  •  P Pause  •  R Restart',
+    ARENA_CONFIG.width - 22,
+    botY + 27,
+    13,
+    '#cbd5e1',
+    { weight: '700', align: 'right', stroke: null },
+  );
 }
 
 export function drawTitleBriefingOverlay(ctx, worldState, bestScore, interactiveButtons, hoveredButtonId) {
-  const px = 90;
-  const py = 92;
-  const pw = ARENA_CONFIG.width - 180;
-  const ph = 626;
+  // Subtle upper/lower gradient scrims only so the center sunlit live battle remains crystal clear!
+  const topScrim = ctx.createLinearGradient(0, ARENA_CONFIG.hudTopHeight, 0, 290);
+  topScrim.addColorStop(0, 'rgba(12, 16, 30, 0.72)');
+  topScrim.addColorStop(1, 'rgba(12, 16, 30, 0)');
+  ctx.fillStyle = topScrim;
+  ctx.fillRect(0, ARENA_CONFIG.hudTopHeight, ARENA_CONFIG.width, 220);
 
-  drawRoundedRect(ctx, px, py, pw, ph, 16);
-  ctx.fillStyle = 'rgba(7, 13, 27, 0.92)';
-  ctx.fill();
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 3;
-  ctx.stroke();
+  const botScrim = ctx.createLinearGradient(0, 560, 0, ARENA_CONFIG.height);
+  botScrim.addColorStop(0, 'rgba(12, 16, 30, 0)');
+  botScrim.addColorStop(0.45, 'rgba(12, 16, 30, 0.80)');
+  botScrim.addColorStop(1, 'rgba(12, 16, 30, 0.94)');
+  ctx.fillStyle = botScrim;
+  ctx.fillRect(0, 560, ARENA_CONFIG.width, ARENA_CONFIG.height - 560);
 
-  // Header badge
-  drawRoundedRect(ctx, px + 340, py + 18, pw - 680, 30, 15);
-  ctx.fillStyle = '#1e3a8a';
-  ctx.fill();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  setFont(ctx, '800', 13);
-  ctx.fillStyle = '#67e8f9';
-  ctx.fillText('TACTICAL ARENA ROGUELITE • KEYBOARD + MOUSE', ARENA_CONFIG.width / 2, py + 33);
-
-  // Main Title
-  setFont(ctx, '900', 52);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText('SPRINTER BASTION', ARENA_CONFIG.width / 2, py + 84);
-
-  setFont(ctx, '700', 18);
-  ctx.fillStyle = '#facc15';
-  ctx.fillText('OVERDRIVE PROTOCOL — DEFEND THE CENTRAL AEGIS CORE', ARENA_CONFIG.width / 2, py + 122);
-
-  // Left Card: Mission Goal & Rules
-  const colY = py + 150;
-  const colW = 500;
-  const colH = 330;
-  const leftX = px + 34;
-  drawRoundedRect(ctx, leftX, colY, colW, colH, 12);
-  ctx.fillStyle = 'rgba(15, 26, 50, 0.95)';
-  ctx.fill();
-  ctx.strokeStyle = '#22d3ee';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.textAlign = 'left';
-  setFont(ctx, '800', 20);
-  ctx.fillStyle = '#22d3ee';
-  ctx.fillText('MISSION GOAL & TACTICAL RULES', leftX + 22, colY + 32);
-
-  const rules = [
-    ['1. WIN / LOSE:', 'Survive 5 escalating waves & defeat the Chrono Warden Boss.'],
-    ['', 'Lose if your Sprinter Hull or the central Bastion Core hits 0 HP.'],
-    ['2. BASTION PARRY:', 'Phase-Dash through enemy laser sights & plasma orbs to'],
-    ['', 'reflect fire, gain +250 Score, boost Combo & charge Overdrive!'],
-    ['3. OVERDRIVE NOVA:', 'At 100% Overdrive, press [E / Q] to unleash a screen-wide'],
-    ['', 'plasma shockwave that obliterates projectiles & stuns foes.'],
-    ['4. AUGMENT DECK:', 'Choose 1 of 3 Weapon Evolutions & Upgrades after every wave.'],
-  ];
-
-  let ry = colY + 68;
-  for (let i = 0; i < rules.length; i += 1) {
-    const [label, desc] = rules[i];
-    if (label) {
-      setFont(ctx, '800', 14);
-      ctx.fillStyle = '#facc15';
-      ctx.fillText(label, leftX + 22, ry);
-      setFont(ctx, '600', 14);
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillText(desc, leftX + 158, ry);
-    } else {
-      setFont(ctx, '500', 14);
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(desc, leftX + 158, ry);
-    }
-    ry += 35;
-  }
-
-  // Right Card: Responsive Controls
-  const rightX = px + pw - colW - 34;
-  drawRoundedRect(ctx, rightX, colY, colW, colH, 12);
-  ctx.fillStyle = 'rgba(15, 26, 50, 0.95)';
-  ctx.fill();
-  ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  setFont(ctx, '800', 20);
-  ctx.fillStyle = '#f59e0b';
-  ctx.fillText('RESPONSIVE KEYBOARD + MOUSE CONTROLS', rightX + 22, colY + 32);
-
-  const controls = [
-    ['WASD / Arrow Keys', '8-Directional Sprinter Rig Movement'],
-    ['Mouse + Left-Click', '360° Reticle Aiming & Primary Weapon Fire'],
-    ['Space / Shift / R-Click', 'Phase-Dash & Bastion Projectile Parry'],
-    ['E / Q / Middle-Click', 'Unleash Overdrive Nova (at 100% Charge)'],
-    ['Keys 1 / 2 / 3 or Click', 'Select Tactical Augment Card Between Waves'],
-    ['P Key / Pause Button', 'Pause & Tactical Inspection'],
-    ['R Key / M Key', 'Instant Restart Run (R) • Synth Mute (M)'],
-  ];
-
-  let cy = colY + 70;
-  for (let i = 0; i < controls.length; i += 1) {
-    const [keyText, actionText] = controls[i];
-    drawRoundedRect(ctx, rightX + 20, cy - 13, 178, 26, 5);
-    ctx.fillStyle = '#1e293b';
-    ctx.fill();
-    ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.textAlign = 'center';
-    setFont(ctx, '800', 13);
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillText(keyText, rightX + 109, cy);
-
-    ctx.textAlign = 'left';
-    setFont(ctx, '600', 14);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(actionText, rightX + 210, cy);
-    cy += 37;
-  }
-
-  // Bottom Start CTA Button
-  const startBtn = {
-    id: 'btn_start_mission',
-    x: ARENA_CONFIG.width / 2 - 290,
-    y: py + ph - 118,
-    w: 580,
-    h: 64,
-    command: CMD_START_OR_CONFIRM,
-  };
-  interactiveButtons.push(startBtn);
-
-  drawRoundedRect(ctx, startBtn.x, startBtn.y, startBtn.w, startBtn.h, 12);
-  ctx.fillStyle = hoveredButtonId === startBtn.id ? '#0ea5e9' : '#0284c7';
+  // Top Emblem Crest Banner
+  const cx = ARENA_CONFIG.width / 2;
+  roundedRectPath(ctx, cx - 330, 96, 660, 128, 22);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
   ctx.fill();
   ctx.strokeStyle = '#facc15';
   ctx.lineWidth = 3;
   ctx.stroke();
 
-  ctx.textAlign = 'center';
-  setFont(ctx, '900', 24);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('▶ START MISSION — CLICK OR PRESS SPACE', ARENA_CONFIG.width / 2, startBtn.y + 33);
+  labelText(ctx, 'SPRINTER BASTION', cx, 146, 56, '#ffffff', {
+    weight: '900',
+    stroke: '#121829',
+    strokeScale: 0.16,
+    spacing: '2px',
+  });
+  labelText(ctx, 'DEFEND THE AEGIS CORE  •  PARRY FIRE  •  EVOLVE YOUR RIG', cx, 198, 17, '#fde047', {
+    weight: '800',
+  });
 
-  setFont(ctx, '700', 15);
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillText(
-    `RECORD SCORE: ${bestScore.toLocaleString('en-US')} PTS  •  5 ESCALATING WAVES + CHRONO WARDEN BOSS`,
-    ARENA_CONFIG.width / 2,
-    py + ph - 26,
-  );
+  // Prominent [ PLAY ] CTA Button near bottom above the compact keycap strip
+  const playBtn = {
+    id: 'btn_start_mission',
+    x: cx - 170,
+    y: 610,
+    w: 340,
+    h: 72,
+    command: CMD_START_OR_CONFIRM,
+  };
+  interactiveButtons.push(playBtn);
+
+  const btnHovered = hoveredButtonId === playBtn.id;
+  const btnGrad = ctx.createLinearGradient(0, playBtn.y, 0, playBtn.y + playBtn.h);
+  btnGrad.addColorStop(0, btnHovered ? '#fde047' : '#facc15');
+  btnGrad.addColorStop(1, btnHovered ? '#f59e0b' : '#d97706');
+
+  roundedRectPath(ctx, playBtn.x, playBtn.y, playBtn.w, playBtn.h, 16);
+  ctx.fillStyle = btnGrad;
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  labelText(ctx, '▶  PLAY', cx, playBtn.y + 37, 34, '#121829', {
+    weight: '900',
+    stroke: '#fef9c3',
+    strokeScale: 0.08,
+  });
+
+  // Compact Control Strip with visual keycaps at bottom
+  const controls = [
+    ['WASD', 'Move'],
+    ['MOUSE', 'Aim / Fire'],
+    ['SPACE', 'Dash / Parry'],
+    ['Q / E', 'Overdrive'],
+    ['1-3', 'Draft Cards'],
+  ];
+  const pillW = 202;
+  const gap = 16;
+  const stripStart = cx - (controls.length * pillW + (controls.length - 1) * gap) / 2;
+  const stripY = 716;
+
+  for (let i = 0; i < controls.length; i += 1) {
+    const [keyLabel, actionLabel] = controls[i];
+    const px = stripStart + i * (pillW + gap);
+    roundedRectPath(ctx, px, stripY, pillW, 42, 10);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.fill();
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    roundedRectPath(ctx, px + 8, stripY + 7, 74, 28, 7);
+    ctx.fillStyle = '#1e293b';
+    ctx.fill();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    labelText(ctx, keyLabel, px + 45, stripY + 21, 13, '#38bdf8', { weight: '900', stroke: null });
+    labelText(ctx, actionLabel, px + 142, stripY + 21, 14, '#f8fafc', { weight: '700', stroke: null });
+  }
+  void worldState;
+  void bestScore;
+}
+
+function drawAugmentEmblem(ctx, card, cx, cy) {
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Shielded circular frame
+  ctx.beginPath();
+  ctx.arc(0, 0, 54, 0, TAU);
+  ctx.fillStyle = '#131d36';
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = card.badgeColor;
+  ctx.stroke();
+
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 3;
+  ctx.fillStyle = card.badgeColor;
+
+  if (card.weaponEvolution === 'prismScatter') {
+    for (const a of [-0.48, 0, 0.48]) {
+      ctx.save();
+      ctx.rotate(a);
+      ctx.fillRect(-5, -36, 10, 46);
+      ctx.strokeRect(-5, -36, 10, 46);
+      ctx.beginPath();
+      ctx.arc(0, -38, 6, 0, TAU);
+      ctx.fillStyle = '#fef08a';
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  } else if (card.weaponEvolution === 'arcLance') {
+    drawBoltIcon(ctx, 0, 0, 74, '#c084fc');
+    ctx.beginPath();
+    ctx.arc(-24, -18, 6, 0, TAU);
+    ctx.arc(24, 18, 6, 0, TAU);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fill();
+  } else if (card.weaponEvolution === 'twinRail') {
+    for (const ox of [-14, 14]) {
+      ctx.fillRect(ox - 6, -34, 12, 68);
+      ctx.strokeRect(ox - 6, -34, 12, 68);
+      ctx.fillStyle = '#e0f2fe';
+      ctx.fillRect(ox - 2, -28, 4, 56);
+      ctx.fillStyle = card.badgeColor;
+    }
+  } else if (card.id === 'bastion_parry_capacitor') {
+    drawShieldIcon(ctx, 0, 0, 68, '#22d3ee');
+    ctx.beginPath();
+    ctx.arc(0, 0, 38, -0.8, 0.8);
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  } else if (card.id === 'aegis_nanite_repair') {
+    drawHeartIcon(ctx, 0, 2, 64, '#10b981');
+  } else {
+    drawBoltIcon(ctx, 0, 0, 72, '#fb7185');
+  }
+  ctx.restore();
 }
 
 export function drawAugmentSelectionModal(ctx, worldState, interactiveButtons, hoveredButtonId) {
   const choices = worldState.augmentChoices || [];
-  const mx = 74;
-  const my = 96;
-  const mw = ARENA_CONFIG.width - 148;
-  const mh = 616;
 
-  drawRoundedRect(ctx, mx, my, mw, mh, 16);
-  ctx.fillStyle = 'rgba(7, 13, 27, 0.93)';
-  ctx.fill();
-  ctx.strokeStyle = '#facc15';
-  ctx.lineWidth = 3;
-  ctx.stroke();
+  // Semi-transparent scrim keeping arena clearly visible underneath
+  ctx.fillStyle = 'rgba(10, 15, 28, 0.58)';
+  ctx.fillRect(0, ARENA_CONFIG.hudTopHeight, ARENA_CONFIG.width, ARENA_CONFIG.height - ARENA_CONFIG.hudTopHeight);
 
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  setFont(ctx, '900', 34);
-  ctx.fillStyle = '#facc15';
-  ctx.fillText(`WAVE ${worldState.wave} CLEARED — TACTICAL AUGMENT & EVOLUTION`, ARENA_CONFIG.width / 2, my + 44);
+  // Header Banner
+  labelText(ctx, `WAVE ${worldState.wave} CLEARED — CHOOSE AN UPGRADE`, ARENA_CONFIG.width / 2, 134, 34, '#fde047', {
+    weight: '900',
+    stroke: INK,
+    strokeScale: 0.16,
+  });
 
-  setFont(ctx, '700', 17);
-  ctx.fillStyle = '#e2e8f0';
-  ctx.fillText(
-    'CHOOSE 1 OF 3 UPGRADE CARDS TO EVOLVE YOUR SPRINTER RIG  •  CLICK A CARD OR PRESS [1] [2] [3]',
-    ARENA_CONFIG.width / 2,
-    my + 82,
-  );
-
-  const cardW = 336;
-  const cardH = 440;
-  const gap = 28;
+  const cardW = 320;
+  const cardH = 420;
+  const gap = 34;
   const startX = (ARENA_CONFIG.width - (cardW * 3 + gap * 2)) / 2;
-  const cardY = my + 116;
+  const cardY = 186;
   const cardCommands = [CMD_CARD_1, CMD_CARD_2, CMD_CARD_3];
 
   for (let i = 0; i < 3; i += 1) {
@@ -454,305 +517,239 @@ export function drawAugmentSelectionModal(ctx, worldState, interactiveButtons, h
       command: cardCommands[i],
     });
 
-    drawRoundedRect(ctx, cx, cardY, cardW, cardH, 14);
-    ctx.fillStyle = isSelected ? 'rgba(23, 43, 84, 0.98)' : 'rgba(15, 25, 48, 0.95)';
+    roundedRectPath(ctx, cx, cardY, cardW, cardH, 18);
+    ctx.fillStyle = isSelected ? 'rgba(24, 38, 72, 0.96)' : 'rgba(15, 23, 42, 0.93)';
     ctx.fill();
     ctx.strokeStyle = isSelected ? '#facc15' : card.badgeColor;
-    ctx.lineWidth = isSelected ? 3.5 : 2;
+    ctx.lineWidth = isSelected ? 4 : 2.5;
     ctx.stroke();
 
-    // Key shortcut badge [1], [2], [3]
-    drawRoundedRect(ctx, cx + 18, cardY + 16, 54, 30, 6);
+    // Top Category Pill + Keycap
+    roundedRectPath(ctx, cx + 18, cardY + 18, 46, 30, 8);
     ctx.fillStyle = card.badgeColor;
     ctx.fill();
-    ctx.textAlign = 'center';
-    setFont(ctx, '900', 15);
-    ctx.fillStyle = '#090d16';
-    ctx.fillText(`KEY ${i + 1}`, cx + 45, cardY + 31);
+    labelText(ctx, `[${i + 1}]`, cx + 41, cardY + 33, 15, INK, { weight: '900', stroke: null });
+    labelText(ctx, card.category, cx + cardW - 20, cardY + 33, 12, card.badgeColor, {
+      weight: '800',
+      align: 'right',
+      stroke: null,
+    });
 
-    // Category pill
-    ctx.textAlign = 'right';
-    setFont(ctx, '800', 12);
-    ctx.fillStyle = card.badgeColor;
-    ctx.fillText(card.category, cx + cardW - 18, cardY + 31);
+    // Illustrated Emblem
+    drawAugmentEmblem(ctx, card, cx + cardW / 2, cardY + 132);
 
-    // Procedural emblem illustration inside card
-    const iconCenterX = cx + cardW / 2;
-    const iconCenterY = cardY + 114;
-    ctx.beginPath();
-    ctx.arc(iconCenterX, iconCenterY, 44, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(9, 16, 32, 0.9)';
-    ctx.fill();
-    ctx.strokeStyle = card.badgeColor;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // Emblem geometry
-    ctx.save();
-    ctx.translate(iconCenterX, iconCenterY);
-    ctx.strokeStyle = card.badgeColor;
-    ctx.fillStyle = card.badgeColor;
-    ctx.lineWidth = 3;
-    if (card.weaponEvolution === 'prismScatter') {
-      for (let a = -1; a <= 1; a += 1) {
-        ctx.beginPath();
-        ctx.moveTo(0, 14);
-        ctx.lineTo(a * 22, -24);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(a * 22, -24, 5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (card.weaponEvolution === 'arcLance') {
-      ctx.beginPath();
-      ctx.moveTo(-18, 20);
-      ctx.lineTo(-4, 0);
-      ctx.lineTo(10, 8);
-      ctx.lineTo(20, -22);
-      ctx.stroke();
+    // Short Punchy Title (split cleanly if > 18 chars)
+    const words = card.title.split(' ');
+    if (words.length >= 3) {
+      const mid = Math.ceil(words.length / 2);
+      labelText(ctx, words.slice(0, mid).join(' '), cx + cardW / 2, cardY + 226, 22, '#ffffff', { weight: '900' });
+      labelText(ctx, words.slice(mid).join(' '), cx + cardW / 2, cardY + 254, 22, '#ffffff', { weight: '900' });
     } else {
-      ctx.beginPath();
-      ctx.moveTo(0, -26);
-      ctx.lineTo(24, 0);
-      ctx.lineTo(0, 26);
-      ctx.lineTo(-24, 0);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, 0, 9, 0, Math.PI * 2);
-      ctx.fill();
+      labelText(ctx, card.title, cx + cardW / 2, cardY + 240, 22, '#ffffff', { weight: '900' });
     }
-    ctx.restore();
 
-    // Card Title
-    ctx.textAlign = 'center';
-    setFont(ctx, '900', 20);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(card.title, cx + cardW / 2, cardY + 190);
-
-    // Card Summary (wrapped 2 lines)
-    setFont(ctx, '500', 14);
-    ctx.fillStyle = '#cbd5e1';
-    const words = card.summary.split(' ');
-    const mid = Math.ceil(words.length / 2);
-    ctx.fillText(words.slice(0, mid).join(' '), cx + cardW / 2, cardY + 228);
-    ctx.fillText(words.slice(mid).join(' '), cx + cardW / 2, cardY + 250);
-
-    // Stat bonus box
-    drawRoundedRect(ctx, cx + 18, cardY + 282, cardW - 36, 64, 8);
-    ctx.fillStyle = 'rgba(6, 12, 24, 0.9)';
+    // Single concise stat pill (no verbose paragraph!)
+    roundedRectPath(ctx, cx + 18, cardY + 286, cardW - 36, 44, 10);
+    ctx.fillStyle = 'rgba(9, 14, 26, 0.85)';
     ctx.fill();
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    labelText(ctx, card.statLine, cx + cardW / 2, cardY + 308, 13, '#fef08a', { weight: '800', stroke: null });
 
-    setFont(ctx, '800', 13);
-    ctx.fillStyle = '#10b981';
-    ctx.fillText('TACTICAL MODIFIERS:', cx + cardW / 2, cardY + 302);
-    setFont(ctx, '700', 13);
-    ctx.fillStyle = '#facc15';
-    ctx.fillText(card.statLine, cx + cardW / 2, cardY + 326);
-
-    // Select CTA button inside card
-    drawRoundedRect(ctx, cx + 20, cardY + cardH - 68, cardW - 40, 48, 8);
+    // Select Button
+    roundedRectPath(ctx, cx + 22, cardY + cardH - 68, cardW - 44, 48, 12);
     ctx.fillStyle = isSelected ? '#facc15' : card.badgeColor;
     ctx.fill();
-    setFont(ctx, '900', 16);
-    ctx.fillStyle = '#090d16';
-    ctx.fillText(`SELECT CARD [${i + 1}] / CLICK`, cx + cardW / 2, cardY + cardH - 44);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    labelText(ctx, `EQUIP  [${i + 1}]`, cx + cardW / 2, cardY + cardH - 44, 18, INK, {
+      weight: '900',
+      stroke: null,
+    });
   }
 }
 
 export function drawRunResultsAndRestartModal(ctx, worldState, bestScore, interactiveButtons, hoveredButtonId) {
   const isVictory = worldState.victory;
-  const mx = 130;
-  const my = 96;
-  const mw = ARENA_CONFIG.width - 260;
-  const mh = 612;
+  ctx.fillStyle = 'rgba(10, 14, 28, 0.60)';
+  ctx.fillRect(0, ARENA_CONFIG.hudTopHeight, ARENA_CONFIG.width, ARENA_CONFIG.height - ARENA_CONFIG.hudTopHeight);
 
-  drawRoundedRect(ctx, mx, my, mw, mh, 16);
-  ctx.fillStyle = 'rgba(8, 13, 26, 0.94)';
+  const mw = 740;
+  const mh = 510;
+  const mx = (ARENA_CONFIG.width - mw) / 2;
+  const my = 148;
+
+  roundedRectPath(ctx, mx, my, mw, mh, 20);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
   ctx.fill();
-  ctx.strokeStyle = isVictory ? '#10b981' : '#f43f5e';
-  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = isVictory ? '#34d399' : '#facc15';
+  ctx.lineWidth = 4;
   ctx.stroke();
 
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  // Status badge
-  drawRoundedRect(ctx, ARENA_CONFIG.width / 2 - 190, my + 22, 380, 32, 16);
-  ctx.fillStyle = isVictory ? '#065f46' : '#881337';
+  // Medal / Rank Badge at top center
+  const rank = isVictory ? 'S' : worldState.wave >= 4 ? 'A' : worldState.wave >= 2 ? 'B' : 'C';
+  ctx.beginPath();
+  ctx.arc(ARENA_CONFIG.width / 2, my + 62, 42, 0, TAU);
+  ctx.fillStyle = isVictory ? '#10b981' : '#f59e0b';
   ctx.fill();
-  setFont(ctx, '800', 14);
-  ctx.fillStyle = isVictory ? '#6ee7b7' : '#fda4af';
-  ctx.fillText(isVictory ? 'CAMPAIGN COMPLETE • VICTORY' : 'CAMPAIGN ENDED • BASTION OVERRUN', ARENA_CONFIG.width / 2, my + 38);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  labelText(ctx, rank, ARENA_CONFIG.width / 2, my + 64, 40, INK, { weight: '900', stroke: null });
 
-  // Main Result Header
-  setFont(ctx, '900', 46);
-  ctx.fillStyle = isVictory ? '#10b981' : '#f43f5e';
-  ctx.fillText(
-    isVictory ? 'VICTORY — AEGIS CORE SECURED!' : 'GAME OVER — BASTION FALLEN',
-    ARENA_CONFIG.width / 2,
-    my + 90,
-  );
-
-  // Subtitle & Star Rating
-  const stars = isVictory ? '★★★★★' : worldState.wave >= 4 ? '★★★★☆' : worldState.wave >= 3 ? '★★★☆☆' : '★★☆☆☆';
-  setFont(ctx, '800', 20);
-  ctx.fillStyle = '#facc15';
-  ctx.fillText(
-    `${worldState.defeatReason || 'CHRONO WARDEN ASSAULT'}   •   RATING: ${stars}`,
+  labelText(
+    ctx,
+    isVictory ? 'VICTORY — AEGIS SECURED!' : 'RUN COMPLETE — BASTION FALLEN',
     ARENA_CONFIG.width / 2,
     my + 132,
+    34,
+    isVictory ? '#34d399' : '#fb7185',
+    { weight: '900' },
   );
 
-  // 2x3 Stats Telemetry Grid
-  const stats = [
-    ['FINAL SCORE', worldState.score.toLocaleString('en-US'), `BEST SCORE: ${Math.max(bestScore, worldState.score).toLocaleString('en-US')}`, '#38bdf8'],
-    ['WAVE REACHED', `SECTOR ${worldState.wave} / ${worldState.totalWaves}`, isVictory ? 'CHRONO WARDEN DEFEATED' : 'FINAL BOSS ENCOUNTER', '#facc15'],
-    ['HOSTILES ELIMINATED', `${worldState.kills} FOES`, 'CONFIRMED BASTION KILLS', '#f43f5e'],
-    ['BASTION PARRIES', `${worldState.parries} PARRIES`, 'PHASE-DASH REFLECTIONS', '#22d3ee'],
-    ['PEAK SCORE COMBO', `x${worldState.player.maxCombo.toFixed(2)}`, 'MAXIMUM MULTIPLIER', '#a855f7'],
-    ['FINAL ARMAMENT', worldState.player.weapon.shortLabel, `${worldState.acquiredAugments.length} AUGMENTS EQUIPPED`, '#10b981'],
+  labelText(
+    ctx,
+    `WAVE ${worldState.wave} / ${worldState.totalWaves}  •  BEST SCORE: ${formatNumber(Math.max(bestScore, worldState.score))}`,
+    ARENA_CONFIG.width / 2,
+    my + 170,
+    16,
+    '#fde047',
+    { weight: '800' },
+  );
+
+  // 4 Iconic Stat Tiles
+  const tiles = [
+    ['SCORE', formatNumber(worldState.score), '#38bdf8', 'trophy'],
+    ['KILLS', `${worldState.kills}`, '#fb7185', 'swords'],
+    ['PARRIES', `${worldState.parries}`, '#22d3ee', 'shield'],
+    ['PEAK COMBO', `x${worldState.player.maxCombo.toFixed(1)}`, '#facc15', 'bolt'],
   ];
+  const tileW = 156;
+  const tileH = 148;
+  const tileGap = 18;
+  const gridX = ARENA_CONFIG.width / 2 - (tileW * 4 + tileGap * 3) / 2;
+  const tileY = my + 204;
 
-  const cellW = 296;
-  const cellH = 122;
-  const gapX = 26;
-  const gapY = 22;
-  const gridStartX = (ARENA_CONFIG.width - (cellW * 3 + gapX * 2)) / 2;
-  const gridStartY = my + 168;
-
-  for (let i = 0; i < stats.length; i += 1) {
-    const [label, value, sub, accent] = stats[i];
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const cx = gridStartX + col * (cellW + gapX);
-    const cy = gridStartY + row * (cellH + gapY);
-
-    drawRoundedRect(ctx, cx, cy, cellW, cellH, 10);
-    ctx.fillStyle = 'rgba(15, 26, 50, 0.96)';
+  for (let i = 0; i < tiles.length; i += 1) {
+    const [label, val, accent, iconKind] = tiles[i];
+    const tx = gridX + i * (tileW + tileGap);
+    roundedRectPath(ctx, tx, tileY, tileW, tileH, 14);
+    ctx.fillStyle = '#182440';
     ctx.fill();
     ctx.strokeStyle = accent;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.4;
     ctx.stroke();
 
-    setFont(ctx, '800', 13);
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText(label, cx + cellW / 2, cy + 26);
+    if (iconKind === 'trophy') drawTrophyIcon(ctx, tx + tileW / 2, tileY + 38, 34, accent);
+    else if (iconKind === 'swords') drawCrossedSwordsIcon(ctx, tx + tileW / 2, tileY + 38, 32, accent);
+    else if (iconKind === 'shield') drawShieldIcon(ctx, tx + tileW / 2, tileY + 38, 34, accent);
+    else drawBoltIcon(ctx, tx + tileW / 2, tileY + 38, 34, accent);
 
-    setFont(ctx, '900', 28);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillText(value, cx + cellW / 2, cy + 64);
-
-    setFont(ctx, '700', 13);
-    ctx.fillStyle = accent;
-    ctx.fillText(sub, cx + cellW / 2, cy + 98);
+    labelText(ctx, val, tx + tileW / 2, tileY + 92, 28, '#ffffff', { weight: '900' });
+    labelText(ctx, label, tx + tileW / 2, tileY + 126, 13, accent, { weight: '800', stroke: null });
   }
 
-  // Prominent Restart / Play Again Button
+  // Big [ PLAY AGAIN ] Button
   const restartBtn = {
     id: 'btn_play_again',
-    x: ARENA_CONFIG.width / 2 - 310,
-    y: my + mh - 134,
-    w: 620,
+    x: ARENA_CONFIG.width / 2 - 190,
+    y: my + mh - 102,
+    w: 380,
     h: 66,
     command: CMD_RESTART_RUN,
   };
   interactiveButtons.push(restartBtn);
 
-  drawRoundedRect(ctx, restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h, 12);
-  ctx.fillStyle = hoveredButtonId === restartBtn.id ? '#059669' : '#10b981';
+  roundedRectPath(ctx, restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h, 16);
+  ctx.fillStyle = hoveredButtonId === restartBtn.id ? '#34d399' : '#10b981';
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
+  labelText(ctx, '↻  PLAY AGAIN', ARENA_CONFIG.width / 2, restartBtn.y + 34, 28, INK, {
+    weight: '900',
+    stroke: '#d1fae5',
+    strokeScale: 0.08,
+  });
+
+  labelText(ctx, 'PRESS [R] OR [SPACE] OR CLICK TO RESTART', ARENA_CONFIG.width / 2, my + mh - 18, 13, '#cbd5e1', {
+    weight: '700',
+    stroke: null,
+  });
+}
+
+export function drawPauseModal(ctx, interactiveButtons, hoveredButtonId) {
+  ctx.fillStyle = 'rgba(10, 14, 28, 0.58)';
+  ctx.fillRect(0, ARENA_CONFIG.hudTopHeight, ARENA_CONFIG.width, ARENA_CONFIG.height - ARENA_CONFIG.hudTopHeight);
+
+  const pw = 440;
+  const ph = 240;
+  const px = (ARENA_CONFIG.width - pw) / 2;
+  const py = (ARENA_CONFIG.height - ph) / 2;
+
+  roundedRectPath(ctx, px, py, pw, ph, 18);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
   ctx.fill();
   ctx.strokeStyle = '#facc15';
   ctx.lineWidth = 3;
   ctx.stroke();
 
-  setFont(ctx, '900', 24);
-  ctx.fillStyle = '#06101e';
-  ctx.fillText('↻ PLAY AGAIN / RESTART — CLICK OR PRESS [R / SPACE]', ARENA_CONFIG.width / 2, restartBtn.y + 33);
+  labelText(ctx, 'PAUSED', ARENA_CONFIG.width / 2, py + 52, 36, '#ffffff', { weight: '900' });
 
-  setFont(ctx, '700', 15);
-  ctx.fillStyle = '#cbd5e1';
-  ctx.fillText(
-    'PRESS [R] OR [SPACE] OR CLICK ABOVE TO LAUNCH A NEW CAMPAIGN RUN IMMEDIATELY',
-    ARENA_CONFIG.width / 2,
-    my + mh - 34,
-  );
-}
-
-export function drawPauseModal(ctx, interactiveButtons, hoveredButtonId) {
-  const pw = 540;
-  const ph = 280;
-  const px = (ARENA_CONFIG.width - pw) / 2;
-  const py = (ARENA_CONFIG.height - ph) / 2;
-
-  drawRoundedRect(ctx, px, py, pw, ph, 14);
-  ctx.fillStyle = 'rgba(8, 14, 28, 0.95)';
-  ctx.fill();
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  setFont(ctx, '900', 38);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText('MISSION PAUSED', ARENA_CONFIG.width / 2, py + 58);
-
-  setFont(ctx, '600', 16);
-  ctx.fillStyle = '#cbd5e1';
-  ctx.fillText('Aegis Bastion telemetry on standby. Ready to resume combat.', ARENA_CONFIG.width / 2, py + 104);
-
-  const resumeBtn = { id: 'btn_resume', x: px + 60, y: py + 142, w: 420, h: 50, command: CMD_PAUSE_TOGGLE };
-  const restartBtn = { id: 'btn_pause_restart', x: px + 60, y: py + 206, w: 420, h: 46, command: CMD_RESTART_RUN };
+  const resumeBtn = { id: 'btn_resume', x: px + 50, y: py + 94, w: 340, h: 52, command: CMD_PAUSE_TOGGLE };
+  const restartBtn = { id: 'btn_pause_restart', x: px + 50, y: py + 160, w: 340, h: 48, command: CMD_RESTART_RUN };
   interactiveButtons.push(resumeBtn, restartBtn);
 
-  drawRoundedRect(ctx, resumeBtn.x, resumeBtn.y, resumeBtn.w, resumeBtn.h, 8);
-  ctx.fillStyle = hoveredButtonId === resumeBtn.id ? '#0ea5e9' : '#0284c7';
+  roundedRectPath(ctx, resumeBtn.x, resumeBtn.y, resumeBtn.w, resumeBtn.h, 12);
+  ctx.fillStyle = hoveredButtonId === resumeBtn.id ? '#fde047' : '#facc15';
   ctx.fill();
-  setFont(ctx, '800', 18);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('▶ RESUME MISSION [PRESS P / ESC]', ARENA_CONFIG.width / 2, resumeBtn.y + 25);
+  labelText(ctx, '▶ RESUME [P]', ARENA_CONFIG.width / 2, resumeBtn.y + 26, 20, INK, { weight: '900', stroke: null });
 
-  drawRoundedRect(ctx, restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h, 8);
-  ctx.fillStyle = hoveredButtonId === restartBtn.id ? '#dc2626' : '#334155';
+  roundedRectPath(ctx, restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h, 12);
+  ctx.fillStyle = hoveredButtonId === restartBtn.id ? '#ef4444' : '#334155';
   ctx.fill();
-  setFont(ctx, '800', 16);
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText('↻ RESTART RUN [PRESS R]', ARENA_CONFIG.width / 2, restartBtn.y + 23);
+  labelText(ctx, '↻ RESTART [R]', ARENA_CONFIG.width / 2, restartBtn.y + 24, 18, '#ffffff', {
+    weight: '800',
+    stroke: null,
+  });
 }
 
 export function drawAimReticle(ctx, aimX, aimY, player) {
   ctx.save();
   ctx.translate(aimX, aimY);
 
-  // Subtle dashed aim line from player to reticle
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.restore();
-
-  ctx.strokeStyle = '#facc15';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 4.5;
   ctx.beginPath();
-  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.arc(0, 0, 14, 0, TAU);
   ctx.stroke();
 
-  ctx.beginPath();
-  ctx.moveTo(-21, 0);
-  ctx.lineTo(-8, 0);
-  ctx.moveTo(8, 0);
-  ctx.lineTo(21, 0);
-  ctx.moveTo(0, -21);
-  ctx.lineTo(0, -8);
-  ctx.moveTo(0, 8);
-  ctx.lineTo(0, 21);
+  ctx.strokeStyle = '#fde047';
+  ctx.lineWidth = 2.2;
   ctx.stroke();
+
+  for (const [x1, y1, x2, y2] of [
+    [-22, 0, -8, 0],
+    [8, 0, 22, 0],
+    [0, -22, 0, -8],
+    [0, 8, 0, 22],
+  ]) {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 
   ctx.fillStyle = player.weapon.color;
   ctx.beginPath();
-  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+  ctx.arc(0, 0, 4, 0, TAU);
   ctx.fill();
   ctx.restore();
 }

@@ -1,6 +1,6 @@
 [
-  { "name": "1-title.png", "query": "?shot=title&seed=1" },
-  { "name": "2-combat.png", "query": "?shot=combat&seed=1" },
-  { "name": "3-upgrade.png", "query": "?shot=upgrade&seed=1" },
-  { "name": "4-gameover.png", "query": "?shot=gameover&seed=1" }
+  { "name": "1-title.jpg", "query": "?shot=title&seed=1" },
+  { "name": "2-combat.jpg", "query": "?shot=combat&seed=1" },
+  { "name": "3-upgrade.jpg", "query": "?shot=upgrade&seed=1" },
+  { "name": "4-gameover.jpg", "query": "?shot=gameover&seed=1" }
 ]
